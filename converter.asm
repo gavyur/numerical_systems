@@ -126,7 +126,7 @@ printInBases:
     mov eax,edi
     mov ebx,2
     mov ecx,resultNum
-    call ItoA2
+    call ItoA
     mov ecx,resultNum + 1
     mov dl,[resultNum]
     call printMsg
@@ -146,8 +146,9 @@ printInBases:
     mov edx,hexOutputLen
     call printMsg
     mov eax,edi
+    mov ebx,16
     mov ecx,resultNum
-    call ItoA16
+    call ItoA
     mov ecx,resultNum + 1
     mov dl,[resultNum]
     call printMsg
@@ -167,6 +168,10 @@ printInBases:
 ;-----------------------------------------------------------------------------
 
 ItoA:
+    cmp ebx,2
+    je callItoA2
+    cmp ebx,16
+    je callItoA16
     push esi
     push edi
     push ebp
@@ -199,6 +204,14 @@ ItoA:
     pop ebp
     pop edi
     pop esi
+    ret
+
+callItoA2:
+    call ItoA2
+    ret
+
+callItoA16:
+    call ItoA16
     ret
 
 ;-----------------------------------------------------------------------------

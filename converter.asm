@@ -1,6 +1,3 @@
-; nasm -f elf -g -F dwarf code.asm -l code.lst
-; ld -m elf_i386 -o code code.o
-
 SYS_EXIT    equ 1
 SYS_READ    equ 3
 SYS_WRITE   equ 4
@@ -12,6 +9,25 @@ section .text
     global _start
 
 _start:
+    call inputNumber
+    call printInBases
+
+exit:
+    mov eax,SYS_EXIT            ; The system call for exit (sys_exit)
+    mov ebx,0                   ; Exit with return code of 0 (no error)
+    int INTERRUPT
+
+;-----------------------------------------------------------------------------
+; Reads number in 2, 10, 16 bases from stdin
+; Entry:
+; Exit:
+; Destr: eax, ebx, ecx, edx
+;-----------------------------------------------------------------------------
+
+inputNumber:
+    push edi
+    push esi
+
     mov ecx,inviteCmd
     mov edx,inviteCmdLen
     call printMsg
@@ -19,157 +35,269 @@ _start:
     mov ecx,input
     call inputChar
 
-    cmp byte [input],`b`
+    xor edi,edi
+
+    cmp ebx,`b`
     je binaryInput
 
-    cmp byte [input],`d`
+    cmp ebx,`d`
     je decimalInput
 
-    cmp byte [input],`h`
+    cmp ebx,`h`
     je hexadecimalInput
 
     jmp incorrectInputHandle
 
-    xor eax,eax
-    mov [number],eax
-
     readDigits:
         mov ecx,input
         call inputChar
-        cmp byte [input],`\n`
+        cmp ebx,`\n`
         je endReading
-        cmp byte [input],`a`
+        cmp ebx,`a`
         jae parseLowerLetter
-        cmp byte [input],`A`
+        cmp ebx,`A`
         jae parseUpperLetter
-        cmp byte [input],`0`
+        cmp ebx,`0`
         jae parseDigit
         jmp incorrectInputHandle
         continueReadingDigits:
             xor eax,eax
-            mov al,byte [input]
-            mov ebx,[base]
-            cmp eax,ebx
+            mov al,bl
+            cmp eax,esi
             jae incorrectInputHandle
-            mov eax,[number]
-            mul dword [base]
-            xor ebx,ebx
-            mov bl,byte [input]
+            mov eax,edi
+            xor edx,edx
+            mul esi
             add eax,ebx
-            mov [number],eax
+            mov edi,eax
             jmp readDigits
 
     endReading:
-        call printInBases
-
-exit:
-    mov eax,SYS_EXIT            ; The system call for exit (sys_exit)
-    mov ebx,0                   ; Exit with return code of 0 (no error)
-    int INTERRUPT
+        mov eax,edi
+        pop esi
+        pop edi
+        ret
 
 binaryInput:
-    mov byte [base],2
+    mov esi,2
     jmp readDigits
 
 decimalInput:
-    mov byte [base],10
+    mov esi,10
     jmp readDigits
 
 hexadecimalInput:
-    mov byte [base],16
+    mov esi,16
     jmp readDigits
 
 parseLowerLetter:
-    cmp byte [input],'z'
+    cmp bl,'z'
     ja incorrectInputHandle
-    sub byte [input],`a`-10
+    sub bl,`a`-10
     jmp continueReadingDigits
 
 parseUpperLetter:
-    cmp byte [input],'Z'
+    cmp bl,'Z'
     ja incorrectInputHandle
-    sub byte [input],`A`-10
+    sub bl,`A`-10
     jmp continueReadingDigits
 
 parseDigit:
-    cmp byte [input],'9'
+    cmp bl,'9'
     ja incorrectInputHandle
-    sub byte [input],`0`
+    sub bl,`0`
     jmp continueReadingDigits
 
+;-----------------------------------------------------------------------------
+
+;-----------------------------------------------------------------------------
+; Prints number stored in eax in 2, 10, 16 bases
+; Entry: eax = integer
+; Exit:
+; Destr: eax, ebx, ecx, edx
+;-----------------------------------------------------------------------------
+
 printInBases:
+    push edi
+    mov edi,eax
     mov ecx,binaryOutput
     mov edx,binaryOutputLen
     call printMsg
-    mov eax,[number]
+    mov eax,edi
     mov ebx,2
-    call printInt
-    mov ecx,newLine
-    mov edx,newLineLen
+    mov ecx,resultNum
+    call ItoA2
+    mov ecx,resultNum + 1
+    mov dl,[resultNum]
     call printMsg
 
     mov ecx,decimalOutput
     mov edx,decimalOutputLen
     call printMsg
-    mov eax,[number]
+    mov eax,edi
     mov ebx,10
-    call printInt
-    mov ecx,newLine
-    mov edx,newLineLen
+    mov ecx,resultNum
+    call ItoA
+    mov ecx,resultNum + 1
+    mov dl,[resultNum]
     call printMsg
 
     mov ecx,hexOutput
     mov edx,hexOutputLen
     call printMsg
-    mov eax,[number]
-    mov ebx,16
-    call printInt
-    mov ecx,newLine
-    mov edx,newLineLen
+    mov eax,edi
+    mov ecx,resultNum
+    call ItoA16
+    mov ecx,resultNum + 1
+    mov dl,[resultNum]
     call printMsg
+    pop edi
     ret
 
-printInt:                       ; prints int from eax in base stored in ebx
-    push eax
-    push ebx
-    call countDigits
-    mov [base],ebx
-    printIntLoop:
-        dec ecx
-        push eax                ; save eax
-        mov eax,[base]          ; put in eax base
-        call power              ; get in eax base^ecx
-        mov ebx,eax             ; put result in ebx
-        pop eax                 ; restore eax
+;-----------------------------------------------------------------------------
+
+;-----------------------------------------------------------------------------
+; Store integer from eax in base stored in ebx to string which address in ecx
+; Entry: eax = integer
+;        ebx = base
+;        ecx -> string
+; Exit: [ecx] = length of string
+;       [ecx + 1] = first byte of resulting string
+; Destr: eax, ebx, ecx, edx
+;-----------------------------------------------------------------------------
+
+ItoA:
+    push esi
+    push edi
+    push ebp
+    mov ebp,ecx                 ; ebp = ecx
+    mov edi,eax                 ; edi = eax
+    call countDigits            ; ecx = countDigits(eax, ebx)
+    mov edx,edi                 ; edx = edi
+    mov [ebp],cl
+    inc byte [ebp]
+    inc ebp
+    mov esi,ebx                 ; esi = ebx
+    ItoALoop:
+        dec ecx                 ; ecx--
+        mov eax,esi             ; eax = esi
+        mov edi,ecx             ; edi = ecx
+        push edx
+        call power              ; eax = eax^ecx
+        mov ecx,edi             ; ecx = edi
+        mov ebx,eax             ; ebx = eax
+        pop eax
         xor edx,edx             ; edx = 0
-        div ebx                 ; eax / ebx
-        cmp eax,10
-        jb writeDigitCode       ; if digit <= 9 then print it
-        jmp writeCharCode       ; else print A,B,C,etc
-        continuePrintingLoop:
-            push ecx            ; save ecx
-            push edx            ; save edx
-            mov ecx,printChar
-            mov edx,1
-            call printMsg
-            pop eax
-            pop ecx
-            cmp ecx,0
-            ja printIntLoop
-    pop ebx
-    pop eax
+        div ebx                 ; eax, edx = eax / ebx
+        mov ebx,hexStr          ; ebx = hexStr
+        xlat                    ; eax = ascii(eax)
+        mov [ebp],al
+        inc ebp
+        cmp ecx,0
+        ja ItoALoop
+    mov byte [ebp],`\n`
+    pop ebp
+    pop edi
+    pop esi
     ret
-    writeDigitCode:
-        add eax,48
-        mov [printChar],al
-        jmp continuePrintingLoop
-    writeCharCode:
-        add eax,55
-        mov [printChar],al
-        jmp continuePrintingLoop
 
-countDigits:                    ; count digits of integer from eax in base stored in ebx to ecx
-    push eax
+;-----------------------------------------------------------------------------
+
+;-----------------------------------------------------------------------------
+; Store integer from eax in base 2 to string which address in ecx
+; Entry: eax = integer
+;        ecx -> string
+; Exit: [ecx] = length of string
+;       [ecx + 1] = first byte of resulting string
+; Destr: ebx, ecx, edx
+;-----------------------------------------------------------------------------
+
+ItoA2:
+    mov edx,32 ; in 32 bits there are maximum 32 digits in 2 base
+    xor ebx,ebx
+    ItoA2FirstLoop:
+        dec edx
+        rol eax,1
+        mov bl,al
+        and bl,01h
+        cmp bl,0
+        jne ItoA2StartLoop
+        cmp edx,0
+        jne ItoA2FirstLoop
+    ItoA2StartLoop:
+        inc edx
+        mov [ecx],dl
+        add byte [ecx],1 ; add `\n` symbol length
+        inc ecx
+        ItoA2Loop:
+            add ebx,`0`
+            mov [ecx],bl
+            inc ecx
+            rol eax,1
+            xor ebx,ebx
+            mov bl,al
+            and bl,01h
+            dec edx
+            cmp edx,0
+            jne ItoA2Loop
+        mov byte [ecx],`\n`
+    ret
+
+;-----------------------------------------------------------------------------
+
+;-----------------------------------------------------------------------------
+; Store integer from eax in base 16 to string which address in ecx
+; Entry: eax = integer
+;        ecx -> string
+; Exit: [ecx] = length of string
+;       [ecx + 1] = first byte of resulting string
+; Destr: ebx, ecx, edx
+;-----------------------------------------------------------------------------
+
+ItoA16:
+    mov edx,8 ; in 32 bits there are maximum 8 digits in 16 base
+    xor ebx,ebx
+    ItoA16FirstLoop:
+        dec edx
+        rol eax,4
+        mov bl,al
+        and bl,0fh
+        cmp bl,0
+        jne ItoA16StartLoop
+        cmp edx,0
+        jne ItoA16FirstLoop
+    ItoA16StartLoop:
+        inc edx
+        mov [ecx],dl
+        add byte [ecx],1 ; add `\n` symbol length
+        inc ecx
+        ItoA16Loop:
+            add ebx,hexStr
+            mov ebx,[ebx]
+            mov [ecx],bl
+            inc ecx
+            rol eax,4
+            xor ebx,ebx
+            mov bl,al
+            and bl,0fh
+            dec edx
+            cmp edx,0
+            jne ItoA16Loop
+        mov byte [ecx],`\n`
+    ret
+
+;-----------------------------------------------------------------------------
+
+;-----------------------------------------------------------------------------
+; Count digits of eax in base ebx
+; Entry: eax = integer
+;        ebx = base
+; Exit: eax = 0
+;       ecx = digits count
+; Destr: eax, ecx, edx
+;-----------------------------------------------------------------------------
+
+countDigits:
     xor ecx,ecx
     countDigitsLoop:
         xor edx,edx
@@ -177,30 +305,47 @@ countDigits:                    ; count digits of integer from eax in base store
         inc ecx
         cmp eax,0
         jne countDigitsLoop
-    pop eax
     ret
 
-power:                          ; eax^ecx
-    push ebx
-    push ecx
+;-----------------------------------------------------------------------------
+
+;-----------------------------------------------------------------------------
+; Exponentiate base eax to exponent ecx: eax^ecx
+; Entry: eax = base
+;        ecx = exponent
+; Exit: eax = result of exponentiation
+; Destr: eax, ebx, ecx, edx
+;-----------------------------------------------------------------------------
+
+power:
     mov ebx,eax
     cmp ecx,0
     je zeroPower
-    checkPowerLoop:
+
+    powerLoop:
         dec ecx
         cmp ecx,0
-        ja powerLoop
-    jmp powerExit
-    powerLoop:
+        jbe powerExit
+        xor edx,edx
         mul ebx
-        jmp checkPowerLoop
+        jmp powerLoop
     jmp powerExit
+
     zeroPower:
         mov eax,1
+
     powerExit:
-        pop ecx
-        pop ebx
         ret
+
+;-----------------------------------------------------------------------------
+
+;-----------------------------------------------------------------------------
+; Prints message of length edx stored in [ecx] to stdout
+; Entry: ecx -> String containing message
+;        edx = Length of string
+; Exit: eax = Number of bytes printed or -1 on error
+; Destr: eax, ebx
+;-----------------------------------------------------------------------------
 
 printMsg:
     mov eax,SYS_WRITE           ; The system call for write (sys_write)
@@ -208,12 +353,31 @@ printMsg:
     int INTERRUPT               ; Call the kernel
     ret
 
+;-----------------------------------------------------------------------------
+
+;-----------------------------------------------------------------------------
+; Inputs one character from stdin
+; Entry: ecx -> address for input byte
+; Exit: eax = 1 on success or -1 on error
+; Destr: eax, ebx, ecx, edx
+;-----------------------------------------------------------------------------
+
 inputChar:
     mov eax,SYS_READ            ; The system call for read (sys_read)
     mov ebx,STDIN               ; File descriptor
     mov edx,1
     int INTERRUPT               ; Call the kernel
+    mov bl,[ecx]
     ret
+
+;-----------------------------------------------------------------------------
+
+;-----------------------------------------------------------------------------
+; Handles incorrect user input
+; Entry:
+; Exit:
+; Destr: eax, ebx, ecx, edx
+;-----------------------------------------------------------------------------
 
 incorrectInputHandle:
     call clearStdin
@@ -222,17 +386,24 @@ incorrectInputHandle:
     call printMsg
     jmp exit
 
-clearStdin:
-    jmp clearStdinLoop
-    clearStdinRet:
-        ret
+;-----------------------------------------------------------------------------
 
-clearStdinLoop:                         ; if user entered long text read it all until next line
-    mov ecx,input
-    call inputChar                   ; read another part of input
-    cmp byte [input],`\n`
-    je clearStdinRet
-    jmp clearStdinLoop
+;-----------------------------------------------------------------------------
+; Reads stdin to end of line
+; Entry:
+; Exit:
+; Destr: eax, ebx, ecx, edx
+;-----------------------------------------------------------------------------
+
+clearStdin:
+    clearStdinLoop:
+        mov ecx,input
+        call inputChar                  ; read another part of input
+        cmp ebx,`\n`
+        jne clearStdinLoop              ; read next character if not read newline
+    ret
+
+;-----------------------------------------------------------------------------
 
 section .data
     inviteCmd:              db `Enter number (start with b for binary, d for decimal and h for hexadecimal)> `
@@ -247,9 +418,9 @@ section .data
     hexOutputLen:           equ $-hexOutput
     newLine:                db `\n`
     newLineLen:             equ $-newLine
+    hexStr:                 db `0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ`
+    hexStrLen:              equ $-hexStr
 
 section .bss
-    input:              resb 2
-    base:               resd 4
-    number:             resd 4
-    printChar:          resb 1
+    input:              resb 1
+    resultNum:          resb 34

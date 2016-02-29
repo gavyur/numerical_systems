@@ -1,6 +1,3 @@
-; nasm -f elf -g -F dwarf code.asm -l code.lst
-; ld -m elf_i386 -o code code.o
-
 BUFSIZE     equ 2
 
 SYS_EXIT    equ 1

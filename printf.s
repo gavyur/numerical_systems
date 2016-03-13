@@ -17,13 +17,7 @@ _start:
     push 94
     push printfStringArg
     call printf
-    pop rax
-    pop rax
-    pop rax
-    pop rax
-    pop rax
-    pop rax
-    pop rax
+    add rsp,7*VARSIZE
 
 exit:
     mov rax,SYS_EXIT            ; The system call for exit (sys_exit)
